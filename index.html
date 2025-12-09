@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tauri App</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <div class="manager-container">
+      <div class="manager-header">
+        <h2>GeoGuessr Desktop</h2>
+        <button id="open-geoguessr-btn" class="btn-primary">Open GeoGuessr</button>
+      </div>
+
+      <div class="manager-section">
+        <h3>Userscripts</h3>
+        <button id="add-script-btn" class="btn-secondary">Add Script</button>
+        <div id="scripts-list" class="scripts-list"></div>
+      </div>
+    </div>
+
+    <div id="script-modal" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Add Userscript from URL</h3>
+          <button id="close-modal" class="close-btn">&times;</button>
+        </div>
+        <div class="modal-body">
+          <input type="url" id="script-url" placeholder="https://example.com/script.user.js" class="input-field" />
+          <div id="script-preview" class="script-preview hidden">
+            <h4>Script Information:</h4>
+            <p><strong>Name:</strong> <span id="preview-name"></span></p>
+            <p><strong>Version:</strong> <span id="preview-version"></span></p>
+            <p><strong>Description:</strong> <span id="preview-description"></span></p>
+            <p><strong>Dependencies:</strong> <span id="preview-requires"></span></p>
+          </div>
+          <div id="fetch-error" class="error-message hidden"></div>
+          <div id="fetch-loading" class="loading-message hidden">Fetching script...</div>
+        </div>
+        <div class="modal-footer">
+          <button id="cancel-btn" class="btn-secondary">Cancel</button>
+          <button id="save-script-btn" class="btn-primary" disabled>Add Script</button>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
