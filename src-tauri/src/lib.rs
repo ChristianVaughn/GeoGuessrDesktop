@@ -1546,8 +1546,9 @@ console.log('[GeoGuessr Desktop] Tampermonkey API compatibility loaded');
     // Inject dependencies into page's main world - this is critical for fetch interceptors
     // They need to wrap fetch BEFORE the page makes any requests
     // Skip GEF since it's already loaded as a core dependency
+    // Be specific to only filter GEF files, not other scripts in the same directory (like streak-framework)
     let non_gef_requires: Vec<_> = all_requires.iter()
-        .filter(|url| !url.contains("geoguessr-event-framework"))
+        .filter(|url| !url.contains("geoguessr-event-framework.min.js") && !url.contains("geoguessr-event-framework.js"))
         .collect();
 
     if !non_gef_requires.is_empty() {
