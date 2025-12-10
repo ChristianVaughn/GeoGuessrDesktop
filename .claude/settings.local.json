@@ -4,7 +4,9 @@
       "Bash(find:*)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:miraclewhips.dev)"
+      "WebFetch(domain:miraclewhips.dev)",
+      "WebSearch",
+      "WebFetch(domain:docs.rs)"
     ],
     "deny": [],
     "ask": []

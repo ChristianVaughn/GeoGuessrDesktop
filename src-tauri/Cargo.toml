@@ -29,5 +29,6 @@ regex = "1.10"
 chrono = "0.4"
 base64 = "0.21"
 open = "5"
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["time", "rt-multi-thread"] }
+discord-rich-presence = "1.0.0"
 

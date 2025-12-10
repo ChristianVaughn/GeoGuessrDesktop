@@ -5,6 +5,10 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use uuid::Uuid;
+use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
+
+// Discord Application ID - replace with your actual ID from Discord Developer Portal
+const DISCORD_APP_ID: &str = "1448073023348539495";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct UserScript {
@@ -41,6 +45,7 @@ struct AppState {
     scripts: Mutex<Vec<UserScript>>,
     dependencies: Mutex<HashMap<String, ScriptDependency>>,
     data_dir: PathBuf,
+    discord_client: Mutex<Option<DiscordIpcClient>>,
 }
 
 impl AppState {
@@ -71,6 +76,7 @@ impl AppState {
             scripts: Mutex::new(scripts),
             dependencies: Mutex::new(dependencies),
             data_dir,
+            discord_client: Mutex::new(None),
         }
     }
 
@@ -435,6 +441,85 @@ fn get_data_dir(state: tauri::State<AppState>) -> Result<String, String> {
     Ok(state.data_dir.to_string_lossy().to_string())
 }
 
+// Discord Rich Presence commands
+#[tauri::command]
+async fn discord_connect(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    // Run blocking Discord IPC connection in a separate thread
+    let client_result = tokio::task::spawn_blocking(move || {
+        let mut client = DiscordIpcClient::new(DISCORD_APP_ID);
+        client.connect()
+            .map_err(|e| format!("Failed to connect to Discord: {}", e))?;
+        Ok::<_, String>(client)
+    }).await.map_err(|e| format!("Task error: {}", e))?;
+
+    match client_result {
+        Ok(client) => {
+            *state.discord_client.lock().unwrap() = Some(client);
+            println!("[Discord] Connected to Discord RPC");
+            Ok(())
+        }
+        Err(e) => {
+            println!("[Discord] Connection failed: {}", e);
+            Err(e)
+        }
+    }
+}
+
+#[tauri::command]
+fn discord_update_presence(
+    details: Option<String>,
+    presence_state: Option<String>,
+    start_timestamp: Option<i64>,
+    state: tauri::State<'_, AppState>
+) -> Result<(), String> {
+    let mut guard = state.discord_client.lock().unwrap();
+    if let Some(client) = guard.as_mut() {
+        let mut act = activity::Activity::new();
+
+        if let Some(d) = &details {
+            act = act.details(d);
+        }
+        if let Some(s) = &presence_state {
+            act = act.state(s);
+        }
+        if let Some(ts) = start_timestamp {
+            act = act.timestamps(activity::Timestamps::new().start(ts));
+        }
+
+        // Add assets (you can configure these in Discord Developer Portal)
+        act = act.assets(
+            activity::Assets::new()
+                .large_image("geoguessr_logo")
+                .large_text("GeoGuessr Desktop")
+        );
+
+        client.set_activity(act)
+            .map_err(|e| format!("Failed to set activity: {}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn discord_clear_presence(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let mut guard = state.discord_client.lock().unwrap();
+    if let Some(client) = guard.as_mut() {
+        client.clear_activity()
+            .map_err(|e| format!("Failed to clear activity: {}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn discord_disconnect(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let mut guard = state.discord_client.lock().unwrap();
+    if let Some(mut client) = guard.take() {
+        client.close()
+            .map_err(|e| format!("Failed to disconnect from Discord: {}", e))?;
+        println!("[Discord] Disconnected from Discord RPC");
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn open_geoguessr(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<(), String> {
     if let Some(_window) = app.get_webview_window("geoguessr") {
@@ -672,6 +757,7 @@ console.log('[GeoGuessr Desktop] Tampermonkey API compatibility loaded');
   settingsPanel.style.display = 'none';
   settingsPanel.innerHTML = `
     <div class="gg-settings-header">Scripts</div>
+    <div class="gg-settings-disclaimer">Scripts run at your own risk. We are not responsible for any issues caused by third-party scripts.</div>
     <div id="gg-scripts-list"></div>
     <div class="gg-settings-add">
       <input type="text" id="gg-add-url" placeholder="Script URL (https://...)" />
@@ -756,6 +842,14 @@ console.log('[GeoGuessr Desktop] Tampermonkey API compatibility loaded');
       color: #fff;
       background: #252542;
       border-bottom: 1px solid #2a2a4a;
+    }}
+    .gg-settings-disclaimer {{
+      padding: 8px 16px;
+      font-size: 11px;
+      color: #b0a000;
+      background: rgba(176, 160, 0, 0.1);
+      border-bottom: 1px solid #2a2a4a;
+      text-align: center;
     }}
     #gg-scripts-list {{
       max-height: 300px;
@@ -1236,6 +1330,190 @@ console.log('[GeoGuessr Desktop] Tampermonkey API compatibility loaded');
     let titlebar_base64 = BASE64.encode(titlebar_code.as_bytes());
     combined.push_str(&format!("    injectIntoPage(decodeBase64('{}'), 'custom-titlebar');\n\n", titlebar_base64));
 
+    // Discord Rich Presence integration with GeoGuessr Event Framework
+    let discord_presence_code = r#"(function() {
+  // Prevent re-initialization on SPA navigation
+  if (window.__ggDiscordPresenceInitialized) {
+    return;
+  }
+  window.__ggDiscordPresenceInitialized = true;
+
+  console.log('[Discord Presence] Initializing...');
+
+  var currentMapName = null;
+  var gefLoaded = false;
+  var inGame = false; // True when GEF is actively tracking a game
+
+  // Update Discord presence
+  function updatePresence(details, state) {
+    window.postMessage({
+      type: 'gg_invoke',
+      requestId: 'discord_' + Date.now(),
+      command: 'discord_update_presence',
+      args: {
+        details: details || 'GeoGuessr',
+        presence_state: state || null,
+        start_timestamp: null
+      }
+    }, '*');
+  }
+
+  // Connect to Discord
+  function connectDiscord() {
+    console.log('[Discord Presence] Connecting to Discord...');
+    window.postMessage({
+      type: 'gg_invoke',
+      requestId: 'discord_connect_' + Date.now(),
+      command: 'discord_connect',
+      args: {}
+    }, '*');
+  }
+
+  // Initialize GEF event listeners
+  function initGefListeners() {
+    // GEF is exposed as window.GeoGuessrEventFramework
+    var gef = window.GeoGuessrEventFramework;
+    if (!gef || !gef.events) {
+      console.log('[Discord Presence] GEF not loaded yet, waiting...');
+      return false;
+    }
+
+    console.log('[Discord Presence] GEF loaded, setting up event listeners');
+    gefLoaded = true;
+
+    // Game start - triggered at round 1
+    gef.events.addEventListener('game_start', function(event) {
+      console.log('[Discord Presence] Game started:', event.detail);
+      var state = event.detail;
+      inGame = true;
+
+      currentMapName = state.map && state.map.name ? state.map.name : null;
+      var details = currentMapName ? currentMapName : 'Playing';
+      updatePresence(details, 'Round 1');
+    });
+
+    // Round start
+    gef.events.addEventListener('round_start', function(event) {
+      console.log('[Discord Presence] Round started:', event.detail);
+      var state = event.detail;
+
+      currentMapName = state.map && state.map.name ? state.map.name : null;
+      var details = currentMapName ? currentMapName : 'Playing';
+      var presenceState = state.current_round ? 'Round ' + state.current_round : null;
+      updatePresence(details, presenceState);
+    });
+
+    // Round end
+    gef.events.addEventListener('round_end', function(event) {
+      console.log('[Discord Presence] Round ended:', event.detail);
+      var state = event.detail;
+
+      var details = currentMapName ? currentMapName : 'Playing';
+      var presenceState = state.total_score ?
+        'Score: ' + state.total_score.amount + ' pts' :
+        'Round ' + state.current_round + ' complete';
+      updatePresence(details, presenceState);
+    });
+
+    // Game end
+    gef.events.addEventListener('game_end', function(event) {
+      console.log('[Discord Presence] Game ended:', event.detail);
+      inGame = false;
+      updatePresence('Menus', null);
+    });
+
+    return true;
+  }
+
+  // Check if GEF is already loaded
+  function isGefLoaded() {
+    return typeof window.GeoGuessrEventFramework !== 'undefined' &&
+           window.GeoGuessrEventFramework.events;
+  }
+
+  // Load GEF if not already loaded (with delay to let userscript deps load first)
+  function loadGefIfNeeded() {
+    // Wait 2 seconds for userscript dependencies to load GEF first
+    console.log('[Discord Presence] Waiting for dependencies to load...');
+    setTimeout(function() {
+      if (isGefLoaded()) {
+        console.log('[Discord Presence] GEF already loaded by dependencies');
+        if (initGefListeners()) {
+          console.log('[Discord Presence] GEF event listeners set up successfully');
+        }
+        return;
+      }
+
+      // GEF not loaded by dependencies, load it ourselves
+      console.log('[Discord Presence] Loading GEF ourselves...');
+      var script = document.createElement('script');
+      script.src = 'https://miraclewhips.dev/geoguessr-event-framework/geoguessr-event-framework.min.js';
+      script.onload = function() {
+        console.log('[Discord Presence] GEF script loaded');
+        waitForGef();
+      };
+      script.onerror = function() {
+        console.error('[Discord Presence] Failed to load GEF');
+      };
+      document.head.appendChild(script);
+    }, 2000);
+  }
+
+  // Wait for GEF to initialize
+  function waitForGef() {
+    var retries = 0;
+    var maxRetries = 20; // 10 seconds max
+    var interval = setInterval(function() {
+      if (initGefListeners()) {
+        clearInterval(interval);
+        console.log('[Discord Presence] GEF event listeners set up successfully');
+      } else if (retries >= maxRetries) {
+        clearInterval(interval);
+        console.log('[Discord Presence] GEF not available');
+      }
+      retries++;
+    }, 500);
+  }
+
+  // Check if user left a game (for early exit detection)
+  function isGameUrl() {
+    var path = window.location.pathname;
+    return path.includes('/game/') || path.includes('/duels') ||
+           path.includes('/battle-royale') || path.includes('/challenge');
+  }
+
+  function watchForGameExit() {
+    setInterval(function() {
+      if (inGame && !isGameUrl()) {
+        console.log('[Discord Presence] Left game early, returning to Menus');
+        inGame = false;
+        updatePresence('Menus', null);
+      }
+    }, 1000);
+  }
+
+  // Start everything when DOM is ready
+  function init() {
+    connectDiscord();
+    loadGefIfNeeded();
+    watchForGameExit();
+    // Delay initial presence to let discord_connect complete
+    setTimeout(function() {
+      updatePresence('Menus', null);
+    }, 1000);
+  }
+
+  // Start when body exists
+  if (document.body) {
+    init();
+  } else {
+    document.addEventListener('DOMContentLoaded', init);
+  }
+})();"#;
+
+    let discord_base64 = BASE64.encode(discord_presence_code.as_bytes());
+    combined.push_str(&format!("    injectIntoPage(decodeBase64('{}'), 'discord-presence');\n\n", discord_base64));
+
     // Collect all unique dependencies across all enabled scripts
     let mut all_requires: Vec<String> = Vec::new();
     let mut seen_requires: HashSet<String> = HashSet::new();
@@ -1573,7 +1851,11 @@ pub fn run() {
             reload_scripts,
             close_geoguessr,
             gm_xhr,
-            open_external_url
+            open_external_url,
+            discord_connect,
+            discord_update_presence,
+            discord_clear_presence,
+            discord_disconnect
         ])
         .setup(|app| {
             // Open GeoGuessr window on startup
