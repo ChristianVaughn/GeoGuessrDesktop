@@ -10,6 +10,9 @@ use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
 // Discord Application ID - replace with your actual ID from Discord Developer Portal
 const DISCORD_APP_ID: &str = "1448073023348539495";
 
+// GeoGuessr Event Framework URL - always loaded for Discord presence
+const GEF_URL: &str = "https://miraclewhips.dev/geoguessr-event-framework/geoguessr-event-framework.min.js";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct UserScript {
     id: String,
@@ -548,6 +551,30 @@ async fn open_geoguessr(app: tauri::AppHandle, state: tauri::State<'_, AppState>
 
 fn get_initialization_script(state: &AppState) -> String {
     use std::collections::HashSet;
+    use chrono::Utc;
+
+    // Ensure GEF is loaded (core dependency for Discord presence)
+    {
+        let mut dependencies = state.dependencies.lock().unwrap();
+        if !dependencies.contains_key(GEF_URL) {
+            // Fetch GEF and cache it
+            match fetch_script_from_url(GEF_URL) {
+                Ok(gef_code) => {
+                    let dependency = ScriptDependency {
+                        url: GEF_URL.to_string(),
+                        code: gef_code,
+                        last_updated: Utc::now().timestamp() as u64,
+                    };
+                    dependencies.insert(GEF_URL.to_string(), dependency);
+                    let _ = state.save_dependencies(&dependencies);
+                    println!("[GeoGuessr Desktop] GEF loaded and cached");
+                }
+                Err(e) => {
+                    eprintln!("[GeoGuessr Desktop] Failed to fetch GEF: {}", e);
+                }
+            }
+        }
+    }
 
     let scripts = state.scripts.lock().unwrap();
     let dependencies = state.dependencies.lock().unwrap();
@@ -1431,45 +1458,18 @@ console.log('[GeoGuessr Desktop] Tampermonkey API compatibility loaded');
            window.GeoGuessrEventFramework.events;
   }
 
-  // Load GEF if not already loaded (with delay to let userscript deps load first)
-  function loadGefIfNeeded() {
-    // Wait 2 seconds for userscript dependencies to load GEF first
-    console.log('[Discord Presence] Waiting for dependencies to load...');
-    setTimeout(function() {
-      if (isGefLoaded()) {
-        console.log('[Discord Presence] GEF already loaded by dependencies');
-        if (initGefListeners()) {
-          console.log('[Discord Presence] GEF event listeners set up successfully');
-        }
-        return;
-      }
-
-      // GEF not loaded by dependencies, load it ourselves
-      console.log('[Discord Presence] Loading GEF ourselves...');
-      var script = document.createElement('script');
-      script.src = 'https://miraclewhips.dev/geoguessr-event-framework/geoguessr-event-framework.min.js';
-      script.onload = function() {
-        console.log('[Discord Presence] GEF script loaded');
-        waitForGef();
-      };
-      script.onerror = function() {
-        console.error('[Discord Presence] Failed to load GEF');
-      };
-      document.head.appendChild(script);
-    }, 2000);
-  }
-
-  // Wait for GEF to initialize
-  function waitForGef() {
+  // Set up GEF event listeners (GEF is loaded by GeoGuessr Desktop core before this script)
+  function setupGefListeners() {
+    // GEF should already be loaded by core, but wait briefly for it to initialize
     var retries = 0;
-    var maxRetries = 20; // 10 seconds max
+    var maxRetries = 10; // 5 seconds max
     var interval = setInterval(function() {
       if (initGefListeners()) {
         clearInterval(interval);
         console.log('[Discord Presence] GEF event listeners set up successfully');
       } else if (retries >= maxRetries) {
         clearInterval(interval);
-        console.log('[Discord Presence] GEF not available');
+        console.warn('[Discord Presence] GEF not available after waiting');
       }
       retries++;
     }, 500);
@@ -1479,15 +1479,25 @@ console.log('[GeoGuessr Desktop] Tampermonkey API compatibility loaded');
   function isGameUrl() {
     var path = window.location.pathname;
     return path.includes('/game/') || path.includes('/duels') ||
-           path.includes('/battle-royale') || path.includes('/challenge');
+           path.includes('/battle-royale') || path.includes('/challenge') ||
+           path.includes('/results');
   }
 
+  var exitCheckCount = 0;
   function watchForGameExit() {
     setInterval(function() {
       if (inGame && !isGameUrl()) {
-        console.log('[Discord Presence] Left game early, returning to Menus');
-        inGame = false;
-        updatePresence('Menus', null);
+        exitCheckCount++;
+        // Only trigger exit after 3 consecutive non-game URL checks (3 seconds)
+        // This prevents false triggers during page transitions
+        if (exitCheckCount >= 3) {
+          console.log('[Discord Presence] Left game early, returning to Menus');
+          inGame = false;
+          updatePresence('Menus', null);
+          exitCheckCount = 0;
+        }
+      } else {
+        exitCheckCount = 0;
       }
     }, 1000);
   }
@@ -1495,7 +1505,7 @@ console.log('[GeoGuessr Desktop] Tampermonkey API compatibility loaded');
   // Start everything when DOM is ready
   function init() {
     connectDiscord();
-    loadGefIfNeeded();
+    setupGefListeners();
     watchForGameExit();
     // Delay initial presence to let discord_connect complete
     setTimeout(function() {
@@ -1510,6 +1520,14 @@ console.log('[GeoGuessr Desktop] Tampermonkey API compatibility loaded');
     document.addEventListener('DOMContentLoaded', init);
   }
 })();"#;
+
+    // Always inject GEF first (must wrap fetch before any API calls for Discord presence to work)
+    if let Some(gef) = dependencies.get(GEF_URL) {
+        combined.push_str("    // === Injecting GEF (core dependency) ===\n");
+        combined.push_str("    console.log('[GeoGuessr Desktop] Loading GEF (core dependency)');\n");
+        let gef_base64 = BASE64.encode(gef.code.as_bytes());
+        combined.push_str(&format!("    injectIntoPage(decodeBase64('{}'), 'gef-core');\n\n", gef_base64));
+    }
 
     let discord_base64 = BASE64.encode(discord_presence_code.as_bytes());
     combined.push_str(&format!("    injectIntoPage(decodeBase64('{}'), 'discord-presence');\n\n", discord_base64));
@@ -1527,10 +1545,15 @@ console.log('[GeoGuessr Desktop] Tampermonkey API compatibility loaded');
 
     // Inject dependencies into page's main world - this is critical for fetch interceptors
     // They need to wrap fetch BEFORE the page makes any requests
-    if !all_requires.is_empty() {
+    // Skip GEF since it's already loaded as a core dependency
+    let non_gef_requires: Vec<_> = all_requires.iter()
+        .filter(|url| !url.contains("geoguessr-event-framework"))
+        .collect();
+
+    if !non_gef_requires.is_empty() {
         combined.push_str("    // === Injecting userscript dependencies ===\n");
-        for (dep_index, req_url) in all_requires.iter().enumerate() {
-            if let Some(dep) = dependencies.get(req_url) {
+        for (dep_index, req_url) in non_gef_requires.iter().enumerate() {
+            if let Some(dep) = dependencies.get(*req_url) {
                 combined.push_str(&format!("    console.log('[GeoGuessr Desktop] Loading dependency: {}');\n", req_url));
                 // Use base64 encoding to avoid escaping issues
                 let dep_base64 = BASE64.encode(dep.code.as_bytes());
