@@ -1657,6 +1657,22 @@ console.log('[GeoGuessr Desktop] Tampermonkey API compatibility loaded');
     combined.push_str("    }\n");
     combined.push_str("  });\n\n");
 
+    // Intercept window.open for external URLs (e.g., Street View links)
+    combined.push_str("  // Intercept window.open for external URLs\n");
+    combined.push_str("  var _windowOpen = window.open;\n");
+    combined.push_str("  window.open = function(url, target, features) {\n");
+    combined.push_str("    if (url && typeof url === 'string' && !url.includes('geoguessr.com')) {\n");
+    combined.push_str("      console.log('[GeoGuessr Desktop] Intercepted window.open:', url);\n");
+    combined.push_str("      if (window.__TAURI__ && window.__TAURI__.core) {\n");
+    combined.push_str("        window.__TAURI__.core.invoke('open_external_url', { url: url })\n");
+    combined.push_str("          .catch(function(e) { console.error('[Open External] Error:', e); });\n");
+    combined.push_str("      }\n");
+    combined.push_str("      return null;\n");
+    combined.push_str("    }\n");
+    combined.push_str("    return _windowOpen.call(window, url, target, features);\n");
+    combined.push_str("  };\n");
+    combined.push_str("  console.log('[GeoGuessr Desktop] window.open interceptor initialized');\n\n");
+
     // Intercept external link clicks
     combined.push_str("  // Intercept external link clicks and open in default browser\n");
     combined.push_str("  document.addEventListener('click', function(e) {\n");
