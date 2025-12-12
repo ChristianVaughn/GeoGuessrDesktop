@@ -6,7 +6,8 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:miraclewhips.dev)",
       "WebSearch",
-      "WebFetch(domain:docs.rs)"
+      "WebFetch(domain:docs.rs)",
+      "Bash(grep:*)"
     ],
     "deny": [],
     "ask": []

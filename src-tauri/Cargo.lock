@@ -1251,7 +1251,7 @@ dependencies = [
 
 [[package]]
 name = "geoguessrdesktop"
-version = "0.9.1"
+version = "0.9.5"
 dependencies = [
  "base64 0.21.7",
  "chrono",

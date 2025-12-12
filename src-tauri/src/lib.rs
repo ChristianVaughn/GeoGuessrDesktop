@@ -1664,8 +1664,14 @@ console.log('[GeoGuessr Desktop] Tampermonkey API compatibility loaded');
     combined.push_str("    if (url && typeof url === 'string' && !url.includes('geoguessr.com')) {\n");
     combined.push_str("      console.log('[GeoGuessr Desktop] Intercepted window.open:', url);\n");
     combined.push_str("      if (window.__TAURI__ && window.__TAURI__.core) {\n");
-    combined.push_str("        window.__TAURI__.core.invoke('open_external_url', { url: url })\n");
-    combined.push_str("          .catch(function(e) { console.error('[Open External] Error:', e); });\n");
+    combined.push_str("        // Route Google URLs to Street View popup, others to browser\n");
+    combined.push_str("        if (url.includes('google.com')) {\n");
+    combined.push_str("          window.__TAURI__.core.invoke('open_street_view', { url: url })\n");
+    combined.push_str("            .catch(function(e) { console.error('[Street View] Error:', e); });\n");
+    combined.push_str("        } else {\n");
+    combined.push_str("          window.__TAURI__.core.invoke('open_external_url', { url: url })\n");
+    combined.push_str("            .catch(function(e) { console.error('[Open External] Error:', e); });\n");
+    combined.push_str("        }\n");
     combined.push_str("      }\n");
     combined.push_str("      return null;\n");
     combined.push_str("    }\n");
@@ -1795,6 +1801,42 @@ async fn open_external_url(url: String) -> Result<(), String> {
     open::that(&url).map_err(|e| format!("Failed to open URL: {}", e))
 }
 
+// Open Street View in a popup window
+#[tauri::command]
+async fn open_street_view(url: String, app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::WebviewWindowBuilder;
+    use tauri::WebviewUrl;
+
+    // Reuse existing window or create new one
+    if let Some(window) = app.get_webview_window("street_view") {
+        // Window exists - navigate to new URL and focus
+        window.eval(&format!("window.location.href = '{}';", url))
+            .map_err(|e| e.to_string())?;
+        window.set_focus().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    // Create new popup window
+    WebviewWindowBuilder::new(
+        &app,
+        "street_view",
+        WebviewUrl::External(url.parse().map_err(|_| "Invalid URL".to_string())?)
+    )
+    .title("Street View")
+    .inner_size(1000.0, 700.0)
+    .resizable(true)
+    .decorations(true)  // Native titlebar with close button
+    .on_navigation(move |url| {
+        // Allow Google domains for Street View navigation
+        let host = url.host_str().unwrap_or("");
+        host.contains("google.com") || host.contains("googleapis.com") || host.contains("gstatic.com")
+    })
+    .build()
+    .map_err(|e| format!("Failed to create window: {}", e))?;
+
+    Ok(())
+}
+
 // GM_xmlhttpRequest backend - bypasses CORS by making request from Rust
 #[derive(Debug, Deserialize)]
 struct GmXhrRequest {
@@ -1892,6 +1934,7 @@ pub fn run() {
             close_geoguessr,
             gm_xhr,
             open_external_url,
+            open_street_view,
             discord_connect,
             discord_update_presence,
             discord_clear_presence,
