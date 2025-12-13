@@ -746,37 +746,55 @@ console.log('[GeoGuessr Desktop] Tampermonkey API compatibility loaded');
 
     // Inject custom titlebar with settings panel
     let titlebar_code = format!(r#"(function() {{
+  // Detect macOS
+  var isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+
   // Create titlebar container
   var titlebar = document.createElement('div');
   titlebar.id = 'gg-desktop-titlebar';
   titlebar.setAttribute('data-tauri-drag-region', '');
-  titlebar.innerHTML = `
-    <div class="gg-titlebar-title" data-tauri-drag-region>GeoGuessr Desktop</div>
-    <div class="gg-titlebar-controls">
-      <button id="gg-settings-btn" title="Settings">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="3"></circle>
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-        </svg>
-      </button>
-      <button id="gg-minimize-btn" title="Minimize">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="5" y1="12" x2="19" y2="12"></line>
-        </svg>
-      </button>
-      <button id="gg-maximize-btn" title="Maximize">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-        </svg>
-      </button>
-      <button id="gg-close-btn" title="Close" class="gg-close">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="18" y1="6" x2="6" y2="18"></line>
-          <line x1="6" y1="6" x2="18" y2="18"></line>
-        </svg>
-      </button>
-    </div>
-  `;
+
+  // Settings icon SVG
+  var settingsIcon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>';
+
+  if (isMac) {{
+    // macOS layout: traffic lights on left, centered title, settings on right
+    titlebar.innerHTML = `
+      <div class="gg-mac-controls">
+        <button id="gg-close-btn" class="gg-mac-btn gg-mac-close" title="Close"></button>
+        <button id="gg-minimize-btn" class="gg-mac-btn gg-mac-minimize" title="Minimize"></button>
+        <button id="gg-maximize-btn" class="gg-mac-btn gg-mac-maximize" title="Maximize"></button>
+      </div>
+      <div class="gg-titlebar-title gg-titlebar-title-centered" data-tauri-drag-region>GeoGuessr Desktop</div>
+      <div class="gg-titlebar-controls gg-titlebar-controls-mac">
+        <button id="gg-settings-btn" title="Settings">` + settingsIcon + `</button>
+      </div>
+    `;
+  }} else {{
+    // Windows/Linux layout: title on left, controls on right
+    titlebar.innerHTML = `
+      <div class="gg-titlebar-title" data-tauri-drag-region>GeoGuessr Desktop</div>
+      <div class="gg-titlebar-controls">
+        <button id="gg-settings-btn" title="Settings">` + settingsIcon + `</button>
+        <button id="gg-minimize-btn" title="Minimize">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        </button>
+        <button id="gg-maximize-btn" title="Maximize">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          </svg>
+        </button>
+        <button id="gg-close-btn" title="Close" class="gg-close">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    `;
+  }}
 
   // Create settings panel
   var settingsPanel = document.createElement('div');
@@ -847,6 +865,43 @@ console.log('[GeoGuessr Desktop] Tampermonkey API compatibility loaded');
     .gg-titlebar-controls button.gg-close:hover {{
       background: #e81123;
       color: #fff;
+    }}
+    /* macOS traffic light buttons */
+    .gg-mac-controls {{
+      display: flex;
+      gap: 8px;
+      padding: 0 12px;
+      -webkit-app-region: no-drag;
+    }}
+    .gg-mac-btn {{
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+      padding: 0;
+      transition: filter 0.15s;
+    }}
+    .gg-mac-btn:hover {{
+      filter: brightness(1.1);
+    }}
+    .gg-mac-close {{
+      background: #ff5f57;
+    }}
+    .gg-mac-minimize {{
+      background: #febc2e;
+    }}
+    .gg-mac-maximize {{
+      background: #28c840;
+    }}
+    .gg-titlebar-title-centered {{
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 0;
+    }}
+    .gg-titlebar-controls-mac {{
+      padding-right: 4px;
     }}
     #gg-settings-panel {{
       position: fixed;
@@ -1248,6 +1303,19 @@ console.log('[GeoGuessr Desktop] Tampermonkey API compatibility loaded');
 
     document.getElementById('gg-close-btn').addEventListener('click', function() {{
       window.postMessage({{ type: 'gg_window_control', action: 'close' }}, '*');
+    }});
+
+    // Drag handler for macOS compatibility (CSS app-region is unreliable on macOS)
+    document.getElementById('gg-desktop-titlebar').addEventListener('mousedown', function(e) {{
+      // Don't drag if clicking on controls or settings panel
+      if (e.target.closest('.gg-titlebar-controls') ||
+          e.target.closest('.gg-mac-controls') ||
+          e.target.closest('#gg-settings-panel')) {{
+        return;
+      }}
+      if (window.__TAURI__ && window.__TAURI__.window) {{
+        window.__TAURI__.window.getCurrentWindow().startDragging();
+      }}
     }});
 
     // Add script button
